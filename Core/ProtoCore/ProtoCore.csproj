@@ -171,6 +171,7 @@
     <Compile Include="StringTable.cs" />
     <Compile Include="Utils\ArrayUtils.cs" />
     <Compile Include="Utils\ClassUtils.cs" />
+    <Compile Include="Utils\CodeGenDSImperative.cs" />
     <Compile Include="Utils\CoreUtils.cs" />
     <Compile Include="Utils\FileUtils.cs" />
     <Compile Include="Utils\GCUtils.cs" />

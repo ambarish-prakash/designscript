@@ -38,6 +38,7 @@
         public const string Static = "static";
         public const string Dispose = "_Dispose";
         public const string Invalid = "__invalid";
+        public const string In = "in";
         public static string[] KeywordList = {Native, Class, Constructor, Def, External, Extend, Heap,
                                         If, Elseif, Else, While, For, Import, From, Break,
                                         Continue, Return, Int, Double, String, Bool, Var,
