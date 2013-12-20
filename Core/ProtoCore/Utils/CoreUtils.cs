@@ -561,14 +561,12 @@ namespace ProtoCore.Utils
             // Jun Comment: The current convention for auto generated SSA variables begin with '%'
             // This ensures that the variables is compiler generated as the '%' symbol cannot be used as an identifier and will fail compilation
             Validity.Assert(null != ssaVar);
-            Validity.Assert(ssaVar.Length > 0);
             return ssaVar.StartsWith(ProtoCore.DSASM.Constants.kSSATempPrefix);
         }
 
         public static bool IsTempVarProperty(string varname)
         {
             Validity.Assert(null != varname);
-            Validity.Assert(varname.Length > 0);
             return varname.StartsWith(ProtoCore.DSASM.Constants.kTempPropertyVar);
         }
 
@@ -576,7 +574,6 @@ namespace ProtoCore.Utils
         {
             // Jun Comment: Help function to determine if its a compiler generated temp
             Validity.Assert(null != varname);
-            Validity.Assert(varname.Length > 0);
             return varname.StartsWith(ProtoCore.DSASM.Constants.kInternalNamePrefix);
         }
 
@@ -584,7 +581,6 @@ namespace ProtoCore.Utils
         {
             // Jun Comment: Help function to determine if its a compiler generated temp specifically for a property
             Validity.Assert(null != varname);
-            Validity.Assert(varname.Length > 0);
             return varname.StartsWith(ProtoCore.DSASM.Constants.kTempPropertyVar);
         }
 
@@ -797,6 +793,23 @@ namespace ProtoCore.Utils
                 nodeTo.endLine = nodeFrom.endLine;
                 nodeTo.line = nodeFrom.line;
             }
+        }
+
+
+        /// <summary>
+        /// Gets the has id of a function signature given the name and argument types
+        /// </summary>
+        /// <param name="functionDef"></param>
+        /// <returns></returns>
+        public static int GetFunctionHash(ProtoCore.AST.AssociativeAST.FunctionDefinitionNode functionDef)
+        {
+            Validity.Assert(null != functionDef);
+            string functionDescription = functionDef.Name;
+            foreach (ProtoCore.AST.AssociativeAST.VarDeclNode argNode in functionDef.Signature.Arguments)
+            {
+                functionDescription += argNode.ArgumentType.ToString();
+            }
+            return functionDescription.GetHashCode();
         }
     }
 }

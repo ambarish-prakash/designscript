@@ -12,6 +12,7 @@ using ProtoFFI;
 using ProtoCore.AssociativeGraph;
 using ProtoCore.AST.AssociativeAST;
 using ProtoCore.Mirror;
+using System.Linq;
 
 namespace ProtoScript.Runners
 {
@@ -78,6 +79,8 @@ namespace ProtoScript.Runners
         void UpdateCmdLineInterpreter(string code);
         ProtoCore.Mirror.RuntimeMirror QueryNodeValue(Guid nodeId);
         ProtoCore.Mirror.RuntimeMirror InspectNodeValue(string nodeName);
+
+        void UpdateGraph(AssociativeNode astNode);
         #endregion
 
         #region Asynchronous call
@@ -89,6 +92,7 @@ namespace ProtoScript.Runners
         
         string GetCoreDump();
         void ResetVMAndResyncGraph(List<string> libraries);
+        List<LibraryMirror> ResetVMAndImportLibrary(List<string> libraries);
 		void ReInitializeLiveRunner();
 
         // Event handlers for the notification from asynchronous call
@@ -210,8 +214,6 @@ namespace ProtoScript.Runners
 
             coreOptions.WebRunner = false;
             coreOptions.ExecutionMode = ProtoCore.ExecutionMode.Serial;
-            //coreOptions.DumpByteCode = true;
-            //coreOptions.Verbose = true;
 
             // This should have been set in the consturctor
             Validity.Assert(executionOptions != null);
@@ -474,6 +476,39 @@ namespace ProtoScript.Runners
                     }
                 }
             }
+        }
+
+        /// <summary>
+        /// Called for delta execution of AST node input
+        /// </summary>
+        /// <param name="astNode"></param>
+        public void UpdateGraph(AssociativeNode astNode)
+        {
+            CodeBlockNode cNode = astNode as CodeBlockNode;
+            if (cNode != null)
+            {
+                List<AssociativeNode> astList = cNode.Body;
+                List<Subtree> addedList = new List<Subtree>();
+                addedList.Add(new Subtree(astList, System.Guid.NewGuid()));
+                GraphSyncData syncData = new GraphSyncData(null, addedList, null);
+
+                UpdateGraph(syncData);
+            }
+            else if (astNode is AssociativeNode)
+            {
+                List<AssociativeNode> astList = new List<AssociativeNode>();
+                astList.Add(astNode);
+                List<Subtree> addedList = new List<Subtree>();
+                addedList.Add(new Subtree(astList, System.Guid.NewGuid()));
+                GraphSyncData syncData = new GraphSyncData(null, addedList, null);
+
+                UpdateGraph(syncData);
+            }
+            else
+            {
+                throw new NotImplementedException();
+            }
+
         }
 
         /// <summary>
@@ -757,6 +792,19 @@ namespace ProtoScript.Runners
         }
 
         /// <summary>
+        /// This method updates a redefined function
+        /// </summary>
+        /// <param name="subtree"></param>
+        /// <returns></returns>
+        private void UndefineFunctions(IEnumerable<AssociativeNode> functionDefintions)
+        {
+            foreach (var funcDef in functionDefintions)
+            {
+                runnerCore.SetFunctionInactive(funcDef as FunctionDefinitionNode);
+            }
+        }
+
+        /// <summary>
         /// This is to be used for debugging only to check code emitted from delta AST input
         /// </summary>
         /// <param name="deltaAstList"></param>
@@ -817,6 +865,53 @@ namespace ProtoScript.Runners
             UpdateCmdLineInterpreter(code);
         }
 
+        /// <summary>
+        /// Resets the VM whenever a new library is imported and re-imports them
+        /// Returns the list of new Library Mirrors for reflection
+        /// TODO: It should not be needed once we have language support to insert import statements arbitrarily
+        /// </summary>
+        /// <param name="libraries"></param>
+        /// <returns></returns>
+        public List<LibraryMirror> ResetVMAndImportLibrary(List<string> libraries)
+        {
+            List<LibraryMirror> libs = new List<LibraryMirror>();
+
+            // Reset VM
+            ReInitializeLiveRunner();
+
+            // generate import node for each library in input list
+            List<AssociativeNode> importNodes = null;
+            foreach (string lib in libraries)
+            {
+                importNodes = new List<AssociativeNode>();
+
+                ProtoCore.AST.AssociativeAST.ImportNode importNode = new ProtoCore.AST.AssociativeAST.ImportNode();
+                importNode.ModuleName = lib;
+
+                importNodes.Add(importNode);
+
+                ProtoCore.CodeGenDS codeGen = new ProtoCore.CodeGenDS(importNodes);
+                string code = codeGen.GenerateCode();
+                                
+                int currentCI = runnerCore.ClassTable.ClassNodes.Count;
+
+                UpdateCmdLineInterpreter(code);
+
+                int postCI = runnerCore.ClassTable.ClassNodes.Count;
+
+                IList<ProtoCore.DSASM.ClassNode> classNodes = new List<ProtoCore.DSASM.ClassNode>();
+                for (int i = currentCI; i < postCI; ++i)
+                {
+                    classNodes.Add(runnerCore.ClassTable.ClassNodes[i]);
+                }
+                
+                ProtoCore.Mirror.LibraryMirror libraryMirror = ProtoCore.Mirror.Reflection.Reflect(lib, classNodes, runnerCore);
+                libs.Add(libraryMirror);
+            }            
+
+            return libs;
+        }
+
         private void SynchronizeInternal(GraphSyncData syncData)
         {
             runnerCore.Options.IsDeltaCompile = true;
@@ -859,7 +954,16 @@ namespace ProtoScript.Runners
                             }
                         }
                     }
-                    currentSubTreeList.Remove(st.GUID);
+
+                    Subtree oldSubTree;
+                    if (currentSubTreeList.TryGetValue(st.GUID, out oldSubTree))
+                    {
+                        if (oldSubTree.AstNodes != null)
+                        {
+                            UndefineFunctions(oldSubTree.AstNodes.Where(n => n is FunctionDefinitionNode));
+                        }
+                        currentSubTreeList.Remove(st.GUID);
+                    }
                 }
                 
             }
@@ -872,13 +976,25 @@ namespace ProtoScript.Runners
                     {
                         var nullNodes = MarkGraphNodesInactive(st);
                         if (nullNodes != null)
+                        {
                             deltaAstList.AddRange(nullNodes);
-
+                        }
                         deltaAstList.AddRange(st.AstNodes);
+
+                        UndefineFunctions(st.AstNodes.Where(n => n is FunctionDefinitionNode));
+                    }
+
+                    Subtree oldSubTree;
+                    if (currentSubTreeList.TryGetValue(st.GUID, out oldSubTree))
+                    {
+                        if (oldSubTree.AstNodes != null)
+                        {
+                            UndefineFunctions(oldSubTree.AstNodes.Where(n => n is FunctionDefinitionNode));
+                        }
+                        currentSubTreeList[st.GUID] = st;
                     }
                 }
             }
-
 
             if (syncData.AddedSubtrees != null)
             {
@@ -892,8 +1008,6 @@ namespace ProtoScript.Runners
                     currentSubTreeList.Add(st.GUID, st);
                 }
             }
-
-
             CompileAndExecuteForDeltaExecution(deltaAstList);
         }
 
@@ -1109,8 +1223,6 @@ namespace ProtoScript.Runners
 
                 coreOptions.WebRunner = false;
                 coreOptions.ExecutionMode = ProtoCore.ExecutionMode.Serial;
-                //coreOptions.DumpByteCode = true;
-                //coreOptions.Verbose = true;
 
                 // This should have been set in the consturctor
                 Validity.Assert(executionOptions != null);
